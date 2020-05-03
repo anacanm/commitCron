@@ -18,10 +18,19 @@ type Event struct {
 	CreatedAt time.Time `json:"created_at,string"`
 	Type      string    `json:"type"`
 	Payload   struct {
+		Ref     string `json:"ref"`
 		RefType string `json:"ref_type"`
 		Commits []interface {
 		} `json:"commits"`
 	} `json:"payload"`
+	Repo struct {
+		Name string `json:"name"`
+	} `json:"repo"`
+}
+
+// Message is a struct to Unmarshal the json response into when accessing the github repos api
+type Message struct {
+	Message string `json:"message"`
 }
 
 // sameDay returns true if the other Time (in this case, the git push time), occured on the same day as it currently is
@@ -41,6 +50,45 @@ func sameDay(other time.Time) bool {
 	//at this point, we know the Time at occurence is the same day as this was pushed
 
 	return true
+}
+
+func repoExists(repoName string, repoMap map[string]bool, client *http.Client) (bool, error) {
+	value, present := repoMap[repoName]
+	// first, I check to see if I've already queried the github api for this repo
+	if present {
+		// if I've already queried the github api, then I can simply return what I already know
+		return value, nil
+	}
+	// otherwise, I need to query the github api
+	url := fmt.Sprintf("https://api.github.com/repos/%v", repoName)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, fmt.Errorf("Error creating request to accesses %v: %v", url, err)
+	}
+	req.Header.Add("Authorization", fmt.Sprintf("token %s", os.Getenv("GITHUB_API_TOKEN")))
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("Error in querying %v: %v", url, err)
+	}
+	var message Message
+	err = json.NewDecoder(resp.Body).Decode(&message)
+	if err != nil {
+		return false, fmt.Errorf("Error in decoding the json response from querying %v: %v", url, err)
+	}
+	if message.Message == "" {
+		// no message field indicates that the repo exists
+		// update the map and return true, no errors
+		repoMap[repoName] = true
+		return true, nil
+	}
+	// all messages other than "Not Found" indicate that the repo exists, eg. "Moved Permanently"
+	if message.Message == "Not Found" {
+		// update the map and return false, no errors
+		repoMap[repoName] = false
+		return false, nil
+	}
+	return true, nil
 }
 
 func getNumberOfContributionsToday(client *http.Client) (int, error) {
@@ -69,36 +117,39 @@ func getNumberOfContributionsToday(client *http.Client) (int, error) {
 		return -1, fmt.Errorf("Error in decoding json from response body: %s", err)
 	}
 
-	// repoExists is a map of string repo names to bool values
+	// repoMap is a map of string repo names to bool values
 	// this allows me to reduce calls to the github api to check if a repo exists, I may have already stored it
-	// repoExists := make(map[string]bool)
+	repoMap := make(map[string]bool)
+
+	// things that I have found count as contributions to GitHub:
+	// 	commits each one that is merged counts as a contribution, including the merge request itself. Pushing to branches does not count as a contribution
+	// 	creating a master branch (which does not show up as a commit in events)
+	// 	creating a repository
+	// 	pull requests
 
 	numberOfContributionsToday := 0
 	for _, event := range events {
 		if sameDay(event.CreatedAt) {
-			// if the event was created today then check if there were any contributions made today
-			if event.Type == "CreateEvent" {
-				// if a repository is created, it counts as a contribution (creating a branch does not)
-				if event.Payload.RefType == "repository" {
-
+			repositoryExists, err := repoExists(event.Repo.Name, repoMap, client)
+			if err != nil {
+				return -1, err
+			}
+			if repositoryExists {
+				// if the event was created today, and the repository exists, then check if there were any contributions made today
+				if event.Type == "CreateEvent" {
+					// if a repository was created and still exists, it counts as a contribution
+					// also, creating a master branch counts as a contribution, creating other branches do not
+					if event.Payload.RefType == "repository" || event.Payload.Ref == "master" {
+						numberOfContributionsToday++
+					}
+				} else if event.Type == "PullRequestEvent" {
 					numberOfContributionsToday++
-				}
-				// * NOTE: a possible source of miscalculation lies in the fact that through the events API,
-				// * I have access to Create repository events, yet not whether the repositories ex
-			} else if event.Type == "PullRequestEvent" {
-				numberOfContributionsToday++
-			} else if event.Type == "PushEvent" {
-
-				if sameDay(event.CreatedAt) {
+				} else if event.Type == "PushEvent" {
 					numberOfContributionsToday += len(event.Payload.Commits)
-				} else {
-					fmt.Printf("\n\nnot same day?: %v", event.CreatedAt.Local())
-					break
 				}
+
 			}
 		} else {
-			// since github returns the events sorted in reverse chronological order (most recent first, oldest last),
-			// if an event that did not occur today is reached, I need not traverse any more events, they all occured before today
 			break
 		}
 	}
