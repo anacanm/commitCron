@@ -20,7 +20,9 @@ type Event struct {
 	Payload   struct {
 		Ref     string `json:"ref"`
 		RefType string `json:"ref_type"`
-		Commits []interface {
+		Commits []struct {
+			SHA     string `json:"sha"`
+			Message string `json:"message"`
 		} `json:"commits"`
 	} `json:"payload"`
 	Repo struct {
@@ -152,7 +154,11 @@ func GetNumberOfContributionsToday(client *http.Client) (int, error) {
 				} else if event.Type == "PullRequestEvent" {
 					numberOfContributionsToday++
 				} else if event.Type == "PushEvent" {
-					numberOfContributionsToday += len(event.Payload.Commits)
+					for _, commit := range event.Payload.Commits {
+						if commit.Message != "Update README.md" {
+							numberOfContributionsToday++
+						}
+					}
 				}
 
 			}
