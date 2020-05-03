@@ -1,8 +1,8 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -11,27 +11,43 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func getPublicEvents(client *http.Client) ([]byte, error) {
-	url := fmt.Sprintf("https://api.github.com/users/%s/events", os.Getenv("GITHUB_USERNAME"))
-	req, err := http.NewRequest("GET", url, nil)
+// Event is the struct that will hold the unmarshalled data returned from the github events api
+// from the api, all that is needed is the types and the commits
+// I will iterate over the array of events that occured today, and for events that are type "PushEvent", I will count the # of commits
+type Event struct {
+	Type      string    `json:"type"`
+	CreatedAt time.Time `json:"created_at,string"`
+	Payload   struct {
+		Commits []interface {
+		} `json:"commits"`
+	} `json:"payload"`
+}
 
+func getPublicEvents(client *http.Client) ([]Event, error) {
+	// construct url from username
+	url := fmt.Sprintf("https://api.github.com/users/%s/events", os.Getenv("GITHUB_USERNAME"))
+	// create a new http request with the method and url, no body
+	req, err := http.NewRequest("GET", url, nil)
+	// add the authorization header so that we can access commits to private repos
 	req.Header.Add("Authorization", fmt.Sprintf("token %s", os.Getenv("GITHUB_API_TOKEN")))
+	// send the request
 	resp, err := client.Do(req)
 
 	if err != nil {
 		return nil, err
 	}
-
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Search query failed: %v", resp.Status)
 	}
+	var events []Event
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+		return nil, fmt.Errorf("Error in decoding json from response body: %s", err)
 	}
-	return body, nil
+	return events, nil
+	// body, err := ioutil.ReadAll(resp.Body)
 }
 
 func main() {
@@ -42,13 +58,14 @@ func main() {
 	client := &http.Client{
 		Timeout: time.Second * 7,
 	}
-	response, err := getPublicEvents(client)
+	events, err := getPublicEvents(client)
 	if err != nil {
 		log.Fatal(err)
 	}
-	// the burner.json file is being used in development to look through the json response of the github api
-	if err := ioutil.WriteFile("burner.json", response, 0644); err != nil {
+	data, err := json.MarshalIndent(events, "", "  ")
+	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Print(string(data))
 
 }
