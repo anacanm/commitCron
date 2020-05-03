@@ -71,6 +71,8 @@ func repoExists(repoName string, repoMap map[string]bool, client *http.Client) (
 	if err != nil {
 		return false, fmt.Errorf("Error in querying %v: %v", url, err)
 	}
+	defer resp.Body.Close()
+
 	var message Message
 	err = json.NewDecoder(resp.Body).Decode(&message)
 	if err != nil {
