@@ -1,4 +1,4 @@
-module github.com/anacanm/commitCron
+module github.com/anacanm/contributionCron
 
 go 1.13
 
