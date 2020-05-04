@@ -29,5 +29,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("\n\nNumber of contributions: %v", numberOfContributions)
+	fmt.Printf("Number of contributions: %v\n\n", numberOfContributions)
+	repoName := "burnerContributions"
+	pathToFile := "burner.txt"
+	if err := UpdateFile(repoName, pathToFile, client); err != nil {
+		log.Fatalf("Error updating %v in %v: %v", pathToFile, repoName, err)
+	}
 }
