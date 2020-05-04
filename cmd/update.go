@@ -30,16 +30,17 @@ type CreateResponse struct {
 func UploadFile(url string, client *http.Client, sha string) (CreateResponse, error) {
 	var nilCreateResponse CreateResponse
 	// create a commit message and initial content
-	// the value for the content is the base64 encoded text "intial content"
+	// the "//" is inserted so that script files can be uploaded (works for languages that have // comments, I may add support for other types of comments)
 	var content string
 	var message string
 	if sha == "" {
-		content = "bXkgbmV3IGZpbGUgY29udGVudHM"
+		// the value for the content if the file does not exist is the base64 encoded text "// intial contents"
+		content = "Ly8gaW5pdGlhbCBjb250ZW50cw=="
 		message = "creating file to be uploaded"
 	} else {
-		// the content will be unique,
-		content = base64.StdEncoding.EncodeToString([]byte(sha))
-		message = fmt.Sprintf("updating file with sha:%s", sha)
+		// the content will be unique using the previous sha. it is encoded to base64 in compliance with github api's requirement
+		content = base64.StdEncoding.EncodeToString([]byte("// " + sha))
+		message = fmt.Sprintf("updating file with sha: %v", sha)
 	}
 	reqBody, err := json.Marshal(map[string]string{
 		"message": message,
@@ -71,9 +72,8 @@ func UploadFile(url string, client *http.Client, sha string) (CreateResponse, er
 
 }
 
-// UpdateFile accesses the specified file in the specified repo, where the user must have authorization to read and write to the repo. For this reason, it is
-// recommended that the repo owned by the user, created solely for the purpose of this contribution cron task
-// TODO UpdateFile then commits multiple changes and finally pushes the changes
+// UpdateFile updates the specified file in the specified repo, where the user must have authorization to read and write to the repo. For this reason, it is
+// recommended that the repo owned by the user, created solely for the purpose of this contribution cron task. If the repo is private, the contributions will not show up on your public profile page
 func UpdateFile(repoName string, pathToFile string, client *http.Client) error {
 	// first, we need to get the the sha of the specified file
 	// for ease and efficiency, I will be accessing and updating a simple .txt file
@@ -103,6 +103,8 @@ func UpdateFile(repoName string, pathToFile string, client *http.Client) error {
 		// otherwise, set the sha equal to the sha from the response so that we will update it
 		sha = response.SHA
 	}
+
+	// create a random number of commits (between 4 and 8, inclusive both, 4 and 8 were arbitrarily chosen)
 	randomNumber := rand.Intn(5) + 4
 	for i := 0; i < randomNumber; i++ {
 		createResponse, err := UploadFile(url, client, sha)
