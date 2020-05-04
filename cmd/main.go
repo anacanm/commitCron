@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -22,17 +21,22 @@ func main() {
 		}
 	}
 
+	// create an http Client with a 7 second timeout to be used
 	client := &http.Client{
 		Timeout: time.Second * 7,
 	}
+
 	numberOfContributions, err := contributions.GetNumberOfContributionsToday(client)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Number of contributions: %v\n\n", numberOfContributions)
-	repoName := "burnerContributions"
-	pathToFile := "burner.txt"
-	if err := UpdateFile(repoName, pathToFile, client); err != nil {
-		log.Fatalf("Error updating %v in %v: %v", pathToFile, repoName, err)
+	// if the user has committed less than 4 times, make somewhere between 4 and 8 (random, inclusive) commits to give the illusion of normal commits
+	// 4 is an arbitrary number that I chose so that if I'd already made plenty of commits on a day, that I wouldn't overdo my commits
+	if numberOfContributions < 4 {
+		// repoName is the repository that you want to access
+		// path to file is the relative (relative to the repo) path that
+		if err := UpdateFile(os.Getenv("REPO_NAME"), os.Getenv("PATH_TO_FILE"), client); err != nil {
+			log.Fatalf("Error updating %v in %v: %v", os.Getenv("PATH_TO_FILE"), os.Getenv("REPO_NAME"), err)
+		}
 	}
 }
