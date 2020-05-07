@@ -21,18 +21,29 @@ func main() {
 		}
 	}
 
-	// create an http Client with a 7 second timeout to be used
+	// create an http Client with a 7 second timeout to be used by all goroutines:
+	// From https://golang.org/src/net/http/client.go: 
+	// "Clients should be reused instead of created as needed. Clients are safe for concurrent use by multiple goroutines."
 	client := &http.Client{
 		Timeout: time.Second * 7,
 	}
 
-	numberOfContributions, err := contributions.GetNumberOfContributionsToday(client)
-	if err != nil {
-		log.Fatal(err)
+	// nContributions is an unbuffered channel that will receive the numberOfContributions
+	contributionChannel := make(chan contributions.ContributionItem) 
+
+
+	go contributions.GetNumberOfContributionsToday(client, contributionChannel)
+
+
+	contributionResult := <-contributionChannel
+	if contributionResult.Err != nil {
+		log.Fatalf("Error getting contributions: %v", contributionResult.Err)
 	}
+
+
 	// if the user has committed less than 4 times, make somewhere between 4 and 8 (random, inclusive) commits to give the illusion of normal commits
 	// 4 is an arbitrary number that I chose so that if I'd already made plenty of commits on a day, that I wouldn't overdo my commits
-	if numberOfContributions < 4 {
+	if contributionResult.NumberContributions < 4 {
 		// repoName is the repository that you want to access
 		// path to file is the relative (relative to the repo) path that
 		if err := UpdateFile(os.Getenv("REPO_NAME"), os.Getenv("PATH_TO_FILE"), client); err != nil {
