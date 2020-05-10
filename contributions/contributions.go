@@ -13,6 +13,12 @@ import (
 	"time"
 )
 
+// ContributionItem is a simple struct to hold the number of contributions and an error that are sent in the channel of GetNumberOfContributionsToday
+type ContributionItem struct {
+	NumberContributions int
+	Err                 error
+}
+
 // Event is used to hold the relevant unmarshalled data returned from the github events api
 type Event struct {
 	CreatedAt time.Time `json:"created_at,string"`
@@ -100,30 +106,41 @@ func repoExists(repoName string, repoMap map[string]bool, client *http.Client) (
 // for information how to do so: https://golang.org/pkg/net/http/
 // requires GITHUB_USERNAME and GITHUB_API_TOKEN to be set environment variables
 // GITHUB_API_TOKENs can be created here: https://github.com/settings/tokens, this api token needs full access to the repo scope
-func GetNumberOfContributionsToday(client *http.Client) (int, error) {
+func GetNumberOfContributionsToday(client *http.Client, out chan<- ContributionItem) {
+	// if an error is discovered, send the error message (in a ContributionItem) to the channel and return so that the main process is not blocked
+	// make sure that if the function exits, whether successfuly or due to an error, the channel is closed so that the main process is not blocked
+	defer close(out)
+	
 	// construct url from username
 	url := fmt.Sprintf("https://api.github.com/users/%s/events", os.Getenv("GITHUB_USERNAME"))
 	// create a new http request with the method and url, no body
 	req, err := http.NewRequest("GET", url, nil)
 	// add the authorization header so that we can access commits to private repos
+	if err != nil {
+		out <- ContributionItem{-1, err}
+		return
+	}
 	req.Header.Add("Authorization", fmt.Sprintf("token %s", os.Getenv("GITHUB_API_TOKEN")))
 	// send the request
 	resp, err := client.Do(req)
 
 	if err != nil {
-		return -1, err
+		out <- ContributionItem{-1, err}
+		return
 	}
+	
+	// when this function returns (when an error occurs) or exits naturally (success), quietly close the resp.Body and the channel so that the main goroutine can proceed as it wants 
 	defer resp.Body.Close()
 
 	// checks the status code
 	if resp.StatusCode != http.StatusOK {
-		return -1, fmt.Errorf("Search query failed: %v", resp.Status)
+		out <- ContributionItem{-1, fmt.Errorf("Search query failed: %v", resp.Status)}
 	}
 	var events []Event
 
 	// Unmarshals the data into the an array of Events
 	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
-		return -1, fmt.Errorf("Error in decoding json from response body: %s", err)
+		out <- ContributionItem{-1, fmt.Errorf("Error in decoding json from response body: %s", err)}
 	}
 
 	// repoMap is a map of string repo names to bool values
@@ -141,7 +158,7 @@ func GetNumberOfContributionsToday(client *http.Client) (int, error) {
 		if sameDay(event.CreatedAt) {
 			repositoryExists, err := repoExists(event.Repo.Name, repoMap, client)
 			if err != nil {
-				return -1, err
+				out <- ContributionItem{-1, err}
 			}
 			if repositoryExists {
 				// if the event was created today, and the repository exists, then check if there were any contributions made today
@@ -167,5 +184,5 @@ func GetNumberOfContributionsToday(client *http.Client) (int, error) {
 		}
 	}
 
-	return numberOfContributionsToday, nil
+	out <- ContributionItem{numberOfContributionsToday, nil}
 }
