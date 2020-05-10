@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -79,22 +78,21 @@ func main() {
 			log.Fatalf("Error getting repo contents from %v: %v", repoContentsURL, err)
 
 		case contents := <-getRepoOutput:
-			json, err := json.MarshalIndent(contents, "", "	")
-			if err != nil {
-				log.Fatalf("Error marshalling json data: %v", err)
-			}
 			close(getRepoContentsErrorChan)
 			close(getRepoOutput)
-			fmt.Println(string(json))
-			/*
-				if len(contents) == numberOfContributionsToMake {
-					for _, v := range contents {
-						if err := UpdateFile(os.Getenv("REPO_NAME"), v.Path, client); err != nil {
-							log.Fatalf("Error updating %v in %v: %v", v.Path, os.Getenv("REPO_NAME"), err)
-						}
-					}
+
+			updateErrorChan := make(chan error, cap(contents))
+			updateDonechan := make(chan struct{}, cap(contents))
+			UpdateFilesAndCreateRemaining(contents, client, updateErrorChan, updateDonechan)
+
+			for numMessagesReceived := 0; numMessagesReceived < cap(contents); numMessagesReceived++ {
+				select {
+				case err := <-updateErrorChan:
+					fmt.Println(err)
+				case <-updateDonechan:
+					// do nothing, this is just to drain the responses
 				}
-			*/
+			}
 		}
 		// repoName is the repository that you want to access
 		// path to file is the relative (relative to the repo) path that

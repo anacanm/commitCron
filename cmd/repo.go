@@ -1,14 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
 )
 
-// RepoContent holds the necessary information about the contents of a repository
+// RepoContent holds the necessary information about a content (directory or file) of a repository
 type RepoContent struct {
 	Name  string `json:"name"`
 	Path  string `json:"path"`
@@ -17,7 +19,13 @@ type RepoContent struct {
 	Links struct {
 		Self string `json:"self"`
 	} `json:"_links"`
-	Error error `json:",omitempty"`
+	Error   error  `json:",omitempty"`
+	Message string `json:"message"`
+}
+
+// ErrorResponse holds the necessary response from the GitHub API when an error message is sent
+type ErrorResponse struct {
+	Message string `json:"message"`
 }
 
 // fileCanBeModified is a helper method that helps determine whether or not the file can have a comment safely inserted
@@ -60,6 +68,7 @@ func GetRepoContents(url string, result []RepoContent, nRequiredContents int, cl
 			// the output channel should not block on send (have a buffer where length < capacity), so that this function will be able to send the result and immediately begin termination quietly on its own.
 
 			// If the output channel is blocking (which is not desired), then the goroutine that this is spawned in will have to wait until someone receives on the output channel to begin termination
+
 			output <- result
 			terminate <- struct{}{}
 			return
@@ -90,14 +99,38 @@ func GetRepoContents(url string, result []RepoContent, nRequiredContents int, cl
 		// * if defer were used, the last called response body would be closed, then the second last called response body, and so on until finally the first called response was closed last.
 		// * It is better to explicitly repeat myself more than to use defer and allow the resource leek from keeping the connection open.
 
-		//shallowResult is a temporary location to decode the response from the github api request into. It is from this shallowResult that we can filter through the data
-		var shallowResult []RepoContent
-		err = json.NewDecoder(resp.Body).Decode(&shallowResult)
+		// create a copy of the request body in case the github api sent an error message,
+		// which will be observed in an UnmarshalTypeError
+		bodyBytes, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			errorChan <- fmt.Errorf("Error decoding json response from %v into []RepoContent: %v", url, err)
+			errorChan <- fmt.Errorf("Error reading bytes from resp.body: %v", err)
 			terminate <- struct{}{}
 			resp.Body.Close()
 			return
+		}
+
+		body := ioutil.NopCloser(bytes.NewBuffer(bodyBytes))
+
+		//shallowResult is a temporary location to decode the response from the github api request into. It is from this shallowResult that we can filter through the data
+		var shallowResult []RepoContent
+		err = json.NewDecoder(body).Decode(&shallowResult)
+		if err != nil {
+			var githubError map[string]string
+			if err := json.NewDecoder(bytes.NewBuffer(bodyBytes)).Decode(&githubError); err != nil {
+				errorChan <- fmt.Errorf("Error decoding github error response from %v into map[string]string: %v", url, err)
+				terminate <- struct{}{}
+				resp.Body.Close()
+				return
+			}
+
+			if githubError["message"] != "This repository is empty." {
+				errorChan <- fmt.Errorf("Error from github api attempting to access %v: %v", url, err)
+				terminate <- struct{}{}
+				resp.Body.Close()
+				return
+
+			}
+			// we can ignore an empty repository message because we will fill the repository anyways
 		}
 
 		// although iterating over shallowResult two separate times has a complexity of 0(2n), I believe that due to the nature of directories being small in breadth
@@ -133,6 +166,7 @@ func GetRepoContents(url string, result []RepoContent, nRequiredContents int, cl
 			case <-terminate:
 				// if the terminate message has been received, initiate termination by sending a terminate message to the call below this on the call stack and exit this recusive call
 				terminate <- struct{}{}
+				resp.Body.Close()
 				return
 
 			default:
