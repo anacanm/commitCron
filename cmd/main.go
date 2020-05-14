@@ -83,21 +83,20 @@ func main() {
 		log.Fatalf("Error getting contributions: %v", contributionResult.Err)
 	}
 
-	mCommits, present := os.LookupEnv("MIN_COMMITS")
-	var minCommits int
+	mContributions, present := os.LookupEnv("MIN_CONTRIBUTIONS")
+	var minContributions int
 	if present {
 		var err error
-		minCommits, err = strconv.Atoi(mCommits)
+		minContributions, err = strconv.Atoi(mContributions)
 		if err != nil {
 			log.Fatalf(err.Error())
 		}
 	} else {
-		// if no minCommits specified, then make contributions regardless
-		minCommits = -1
+		// if no minContributions specified, then make contributions regardless
+		minContributions = -1
 	}
-	
 
-	if contributionResult.NumberContributions < minCommits || minCommits == -1 {
+	if contributionResult.NumberContributions < minContributions || minContributions == -1 {
 		// if we want to make contributions, we need to gracefully handle possible errors, and then procede
 		select {
 		case err := <-getRepoContentsErrorChan:
