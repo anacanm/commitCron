@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/anacanm/contributionCron/contributions"
@@ -13,13 +15,30 @@ import (
 
 func main() {
 	// first I need to ensure that I have access to the env variables
-	_, present := os.LookupEnv("ENV")
+	// if an environment variable is not immediately present, then I need to load them from a .env file
+	_, present := os.LookupEnv("GITHUB_USERNAME")
 	// if the environment variables are not accessible automatically, ie. running in development with a .env file, then load them from the .env file
 	if !present {
 		err := godotenv.Load()
 		if err != nil {
 			log.Fatalf("Error loading .env file: %v", err)
 		}
+	}
+
+	nConts, present := os.LookupEnv("NUMBER_CONTRIBUTIONS")
+
+	var numberOfContributionsToMake int
+	if present {
+		// if the user specified the number of contributions that they want to make, convert the string ENV variable to an int,
+		// and set it
+		var convError error
+		numberOfContributionsToMake, convError = strconv.Atoi(nConts)
+		if convError != nil {
+			log.Fatalf(convError.Error())
+		}
+	} else {
+		// if the user did not specify the number of contributions that they want to make, generate a pseudo random number between [3, 7]
+		numberOfContributionsToMake = rand.Intn(5) + 3
 	}
 
 	// create an http Client with a 7 second timeout to be used by all goroutines:
@@ -30,18 +49,14 @@ func main() {
 	}
 
 	// contributionChannel is an unbuffered channel that will receive the numberOfContributions
+	// TODO: consider removing ContributionItem type, and use two separate channels
+	// * NOTE: should contributionChannel be buffered?
 	contributionChannel := make(chan contributions.ContributionItem)
-
-	// TODO: make numberOfContributionsToMake either user-inputted or a random number within a range to provide the illusion of human commits
-	numberOfContributionsToMake := 5
 
 	go contributions.GetNumberOfContributionsToday(client, contributionChannel)
 
 	// "Don't communicate by sharing memory, share memory by communicating": https://www.youtube.com/watch?v=PAAkCSZUG1c&t=2m48s
 
-	// * NOTE: Initialize result with a capacity of numberOfContributionsToMake so that no additional allocation will be needed
-
-	// TODO: if a message from main is sent to finishGetRepo, finishGetRepo needs to be drained and closed
 	repoContentsURL := fmt.Sprintf("https://api.github.com/repos/%v/%v/contents", os.Getenv("GITHUB_USERNAME"), os.Getenv("REPO_NAME"))
 
 	// ! all of the channels used by GetRepoContents should be buffered so that the function can send the necessary message (whether it be an error or result) and immediately begin termination
@@ -59,6 +74,7 @@ func main() {
 
 		defer close(terminateGetRepo)
 
+		// * NOTE: Initialize the result slice with a capacity of numberOfContributionsToMake so that no additional allocation will be needed
 		GetRepoContents(repoContentsURL, make([]RepoContent, 0, numberOfContributionsToMake), numberOfContributionsToMake, client, getRepoOutput, terminateGetRepo, getRepoContentsErrorChan)
 	}()
 
@@ -67,8 +83,20 @@ func main() {
 		log.Fatalf("Error getting contributions: %v", contributionResult.Err)
 	}
 
-	// 4 is an arbitrary number that I chose so that if I'd already made plenty of commits on a day, that I wouldn't overdo my commits
-	if contributionResult.NumberContributions < 100 {
+	mCommits, present := os.LookupEnv("MIN_COMMITS")
+	var minCommits int
+	if present {
+		var err error
+		minCommits, err = strconv.Atoi(mCommits)
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+	} else {
+		// use the default arbitrary minimum commits of 4
+		minCommits = 4
+	}
+
+	if contributionResult.NumberContributions < minCommits {
 		// if we want to make contributions, we need to gracefully handle possible errors, and then procede
 		select {
 		case err := <-getRepoContentsErrorChan:
@@ -88,6 +116,7 @@ func main() {
 			for numMessagesReceived := 0; numMessagesReceived < cap(contents); numMessagesReceived++ {
 				select {
 				case err := <-updateErrorChan:
+					// in case of an error, do not break the whole program, allow the other goroutines to exit and log quietly
 					fmt.Println(err)
 				case <-updateDonechan:
 					// do nothing, this is just to drain the responses

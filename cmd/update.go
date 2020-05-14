@@ -45,7 +45,8 @@ func UpdateFilesAndCreateRemaining(contents []RepoContent, client *http.Client, 
 
 	for _, v := range contents {
 		// fmt.Printf("%#v\n\n", v)
-
+		// currently, it does not seem that the github API accepts concurrent PUT requests. This needs further investigation, until then, the calls to UploadFile are synchronous on this goroutine
+		
 		UploadFile(fmt.Sprintf("https://api.github.com/repos/%v/%v/contents/%v", os.Getenv("GITHUB_USERNAME"), os.Getenv("REPO_NAME"), v.Path), client, v.Name, v.SHA, errorChan, doneChan)
 
 	}
