@@ -2,7 +2,7 @@
 
 contributionCron is my solution to having the GitHub public profile contributions be monitored by recruiters (it's rather panoptic).
 
-contributionCron is a script designed to be set up as a daily scheduled task, which makes commits to a specified repository if a minimum number of commits has been made that day.
+contributionCron is a script designed to be set up as a daily scheduled task, which makes contributions to a specified repository if a minimum number of contributions has not been met that day.
 
 ## Setup
 
