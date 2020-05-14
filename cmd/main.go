@@ -92,11 +92,12 @@ func main() {
 			log.Fatalf(err.Error())
 		}
 	} else {
-		// use the default arbitrary minimum commits of 4
-		minCommits = 4
+		// if no minCommits specified, then make contributions regardless
+		minCommits = -1
 	}
+	
 
-	if contributionResult.NumberContributions < minCommits {
+	if contributionResult.NumberContributions < minCommits || minCommits == -1 {
 		// if we want to make contributions, we need to gracefully handle possible errors, and then procede
 		select {
 		case err := <-getRepoContentsErrorChan:
