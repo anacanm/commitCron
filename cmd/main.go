@@ -38,6 +38,7 @@ func main() {
 		}
 	} else {
 		// if the user did not specify the number of contributions that they want to make, generate a pseudo random number between [3, 7]
+		rand.Seed(time.Now().UnixNano())
 		numberOfContributionsToMake = rand.Intn(5) + 3
 	}
 
